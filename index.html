@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Katana Runner</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0d0d1a;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  color: #fff;
+  overflow: hidden;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+#hud {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  width: 100%;
+  max-width: 400px;
+  padding: 0 8px;
+}
+.hcard {
+  flex: 1;
+  background: rgba(255,255,255,0.08);
+  border: 0.5px solid rgba(255,255,255,0.15);
+  border-radius: 10px;
+  padding: 6px 10px;
+  text-align: center;
+}
+.hlabel { font-size: 10px; color: rgba(255,255,255,0.5); }
+.hval { font-size: 18px; font-weight: 600; }
+.hval.ghost { color: #AFA9EC; }
+.lives { display: flex; justify-content: center; gap: 4px; margin-top: 2px; }
+.heart {
+  width: 14px; height: 14px;
+  background: #E24B4A;
+  clip-path: polygon(50% 90%,5% 35%,15% 10%,35% 5%,50% 20%,65% 5%,85% 10%,95% 35%);
+}
+.heart.empty { opacity: 0.2; }
+canvas {
+  border-radius: 14px;
+  display: block;
+  touch-action: none;
+}
+#tap-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: rgba(255,255,255,0.35);
+}
+
+/* Overlay */
+#overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  z-index: 10;
+}
+#overlay.hidden { display: none; }
+.ov-title { font-size: 26px; font-weight: 700; letter-spacing: 1px; }
+.ov-sub { font-size: 13px; color: rgba(255,255,255,0.6); text-align: center; max-width: 260px; line-height: 1.5; }
+.ov-score { font-size: 42px; font-weight: 700; color: #EF9F27; }
+.ov-best { font-size: 13px; color: rgba(255,255,255,0.5); }
+.btn-primary {
+  background: #EF9F27;
+  color: #1a0f00;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 40px;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.btn-primary:active { transform: scale(0.97); }
+.btn-ghost {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  border: 0.5px solid rgba(255,255,255,0.2);
+  border-radius: 12px;
+  padding: 10px 28px;
+  font-size: 14px;
+  cursor: pointer;
+}
+.btn-ghost:active { transform: scale(0.97); }
+
+/* Shop */
+#shop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  z-index: 20;
+}
+#shop.hidden { display: none; }
+.shop-title { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+.shop-grid { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 300px; }
+.shop-item {
+  background: rgba(255,255,255,0.07);
+  border: 0.5px solid rgba(255,255,255,0.15);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+.shop-item:active { transform: scale(0.98); }
+.shop-item-info .name { font-size: 14px; font-weight: 600; }
+.shop-item-info .desc { font-size: 11px; color: rgba(255,255,255,0.5); margin-top: 2px; }
+.shop-item .price {
+  background: #EF9F27;
+  color: #1a0f00;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div class="hcard">
+    <div class="hlabel">Счёт</div>
+    <div class="hval" id="score-el">0</div>
+  </div>
+  <div class="hcard">
+    <div class="hlabel">Призрак</div>
+    <div class="hval ghost" id="ghost-el">---</div>
+  </div>
+  <div class="hcard">
+    <div class="hlabel">Жизни</div>
+    <div class="lives">
+      <div class="heart" id="h1"></div>
+      <div class="heart" id="h2"></div>
+      <div class="heart" id="h3"></div>
+    </div>
+  </div>
+</div>
+
+<canvas id="c"></canvas>
+<div id="tap-hint">Тап / пробел — прыжок</div>
+
+<!-- Оверлей -->
+<div id="overlay">
+  <div class="ov-title" id="ov-title">⚔️ Katana Runner</div>
+  <div class="ov-sub" id="ov-sub">Прыгай через препятствия.<br>Призрак повторяет твой лучший забег!</div>
+  <div class="ov-score hidden" id="ov-score"></div>
+  <div class="ov-best hidden" id="ov-best"></div>
+  <button class="btn-primary" id="start-btn">Начать игру</button>
+  <button class="btn-ghost hidden" id="shop-open-btn">🛍 Магазин Stars</button>
+  <button class="btn-ghost hidden" id="share-btn">📤 Вызвать друга</button>
+</div>
+
+<!-- Магазин -->
+<div id="shop" class="hidden">
+  <div class="shop-title">🛍 Магазин</div>
+  <div class="ov-sub" style="margin-bottom:4px">Покупки через Telegram Stars</div>
+  <div class="shop-grid">
+    <div class="shop-item" data-item="life" data-stars="50">
+      <div class="shop-item-info">
+        <div class="name">❤️ +1 жизнь</div>
+        <div class="desc">Продолжить прямо сейчас</div>
+      </div>
+      <div class="price">50 ⭐</div>
+    </div>
+    <div class="shop-item" data-item="shield" data-stars="30">
+      <div class="shop-item-info">
+        <div class="name">🛡 Щит</div>
+        <div class="desc">Защита от одного удара</div>
+      </div>
+      <div class="price">30 ⭐</div>
+    </div>
+    <div class="shop-item" data-item="slow" data-stars="40">
+      <div class="shop-item-info">
+        <div class="name">⏳ Замедление</div>
+        <div class="desc">Скорость -50% на 10 сек</div>
+      </div>
+      <div class="price">40 ⭐</div>
+    </div>
+    <div class="shop-item" data-item="skin_red" data-stars="150">
+      <div class="shop-item-info">
+        <div class="name">🔴 Скин «Красный самурай»</div>
+        <div class="desc">Навсегда</div>
+      </div>
+      <div class="price">150 ⭐</div>
+    </div>
+  </div>
+  <button class="btn-ghost" id="shop-close-btn" style="margin-top:8px">Закрыть</button>
+</div>
+
+<script>
+const tg = window.Telegram?.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  const maxW = Math.min(window.innerWidth - 16, 400);
+  canvas.width = maxW;
+  canvas.height = Math.min(window.innerHeight - 160, 260);
+}
+resize();
+window.addEventListener('resize', resize);
+
+const W = () => canvas.width;
+const H = () => canvas.height;
+const GROUND = () => H() - 40;
+const PX = 70;
+
+let score, lives, speed, obstacles, particles, frame, running, dead;
+let ghostRecord = [], ghostBest = [], ghostFrame;
+let best = 0;
+let shieldActive = false, slowActive = false, slowTimer = 0;
+let skin = localStorage.getItem('skin') || 'default';
+
+const player = { y: 0, vy: 0, w: 20, h: 30, jumping: false, flashTimer: 0 };
+
+function initGame() {
+  score = 0; lives = 3; speed = 3.2;
+  obstacles = []; particles = []; frame = 0; ghostFrame = 0;
+  running = true; dead = false;
+  shieldActive = false; slowActive = false; slowTimer = 0;
+  player.y = GROUND(); player.vy = 0; player.jumping = false; player.flashTimer = 0;
+  ghostRecord = [];
+  updateHUD();
+}
+
+function jump() {
+  if (!player.jumping && running && !dead) {
+    player.vy = -12;
+    player.jumping = true;
+  }
+}
+
+function spawnObs() {
+  const h = 26 + Math.random() * 26;
+  obstacles.push({ x: W() + 10, y: GROUND() + player.h - h, w: 14, h, passed: false });
+}
+
+function spawnParticle(x, y, color) {
+  for (let i = 0; i < 7; i++) {
+    particles.push({ x, y, vx: (Math.random() - 0.5) * 5, vy: -2 - Math.random() * 3, life: 1, color });
+  }
+}
+
+function loseLife() {
+  if (shieldActive) { shieldActive = false; player.flashTimer = 30; return; }
+  lives--;
+  player.flashTimer = 50;
+  updateHUD();
+  if (lives <= 0) endGame();
+  else obstacles = obstacles.filter(o => o.x > PX + 80);
+}
+
+function endGame() {
+  dead = true; running = false;
+  if (score > best) { best = score; ghostBest = [...ghostRecord]; }
+  showEndScreen();
+}
+
+function updateHUD() {
+  document.getElementById('score-el').textContent = score;
+  ['h1','h2','h3'].forEach((id, i) => {
+    document.getElementById(id).classList.toggle('empty', i >= lives);
+  });
+  if (ghostBest.length) document.getElementById('ghost-el').textContent = best;
+}
+
+function showEndScreen() {
+  const ol = document.getElementById('overlay');
+  document.getElementById('ov-title').textContent = score > best ? '🏆 Новый рекорд!' : '💀 Погиб в бою';
+  document.getElementById('ov-sub').textContent = '';
+  const sc = document.getElementById('ov-score');
+  sc.textContent = score;
+  sc.classList.remove('hidden');
+  const bs = document.getElementById('ov-best');
+  bs.textContent = 'Лучший: ' + best;
+  bs.classList.remove('hidden');
+  document.getElementById('start-btn').textContent = 'Играть снова';
+  document.getElementById('shop-open-btn').classList.remove('hidden');
+  document.getElementById('share-btn').classList.remove('hidden');
+  ol.classList.remove('hidden');
+}
+
+let lastObs = 0;
+
+function gameLoop() {
+  if (!running) return;
+  frame++;
+  ghostFrame++;
+
+  const spd = slowActive ? speed * 0.5 : speed;
+  if (slowTimer > 0) { slowTimer--; if (slowTimer === 0) slowActive = false; }
+
+  player.vy += 0.65;
+  player.y += player.vy;
+  if (player.y >= GROUND()) { player.y = GROUND(); player.vy = 0; player.jumping = false; }
+  if (player.flashTimer > 0) player.flashTimer--;
+
+  ghostRecord.push(player.y);
+  speed += 0.0008;
+  if (frame % 100 === 0) { score++; updateHUD(); }
+
+  lastObs++;
+  const interval = Math.max(60, 110 - score * 0.3);
+  if (lastObs > interval) { spawnObs(); lastObs = 0; }
+
+  obstacles.forEach(o => {
+    o.x -= spd;
+    if (!o.passed && o.x + o.w < PX) { o.passed = true; score += 2; updateHUD(); }
+    if (player.flashTimer === 0) {
+      const px = PX - player.w / 2 + 4;
+      const py = player.y - player.h + 4;
+      if (px < o.x + o.w && px + player.w - 8 > o.x && py < o.y + o.h && py + player.h - 8 > o.y) {
+        spawnParticle(PX, player.y - player.h / 2, '#E24B4A');
+        loseLife();
+      }
+    }
+  });
+  obstacles = obstacles.filter(o => o.x > -30);
+
+  particles.forEach(p => { p.x += p.vx; p.y += p.vy; p.vy += 0.18; p.life -= 0.045; });
+  particles = particles.filter(p => p.life > 0);
+
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function draw() {
+  const cw = W(), ch = H(), gr = GROUND();
+
+  ctx.fillStyle = '#0d0d1a';
+  ctx.fillRect(0, 0, cw, ch);
+
+  // Луна
+  ctx.fillStyle = 'rgba(255,220,100,0.85)';
+  ctx.beginPath(); ctx.arc(cw - 45, 36, 20, 0, Math.PI * 2); ctx.fill();
+
+  // Пагоды
+  ctx.fillStyle = '#0a0a18';
+  drawPagoda(ctx, (frame * 0.25) % (cw + 80) - 40, gr - 60, 0.8);
+  drawPagoda(ctx, (frame * 0.15 + cw * 0.4) % (cw + 80) - 40, gr - 45, 0.55);
+  drawPagoda(ctx, (frame * 0.10 + cw * 0.7) % (cw + 80) - 40, gr - 80, 1.0);
+
+  // Земля
+  ctx.fillStyle = '#111827';
+  ctx.fillRect(0, gr + player.h, cw, ch - gr - player.h);
+  ctx.fillStyle = '#1f2937';
+  ctx.fillRect(0, gr + player.h, cw, 2);
+
+  // Препятствия
+  obstacles.forEach(o => {
+    ctx.fillStyle = '#4A1B0C';
+    ctx.beginPath();
+    ctx.roundRect(o.x, o.y, o.w, o.h, 3);
+    ctx.fill();
+    ctx.fillStyle = '#712B13';
+    ctx.fillRect(o.x + 2, o.y, 4, o.h);
+    ctx.fillStyle = '#8B4513';
+    ctx.beginPath();
+    ctx.roundRect(o.x - 2, o.y - 4, o.w + 4, 7, 2);
+    ctx.fill();
+  });
+
+  // Призрак
+  if (ghostBest.length && ghostFrame < ghostBest.length) {
+    const gy = ghostBest[ghostFrame] || gr;
+    drawSamurai(ctx, PX + 28, gy, 0.28, '#7F77DD');
+    ctx.save();
+    ctx.globalAlpha = 0.45;
+    ctx.fillStyle = '#AFA9EC';
+    ctx.font = '9px sans-serif';
+    ctx.fillText('призрак', PX + 14, gy - player.h - 4);
+    ctx.restore();
+  }
+
+  // Игрок
+  const flash = player.flashTimer > 0 && Math.floor(player.flashTimer / 5) % 2 === 0;
+  if (!flash) {
+    const playerColor = skin === 'skin_red' ? '#E24B4A' : null;
+    drawSamurai(ctx, PX, player.y, 1, playerColor);
+  }
+
+  // Щит
+  if (shieldActive) {
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.strokeStyle = '#378ADD';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(PX, player.y - player.h / 2, 22, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Замедление
+  if (slowActive) {
+    ctx.save();
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = '#AFA9EC';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('SLOW', PX - 10, player.y - player.h - 8);
+    ctx.restore();
+  }
+
+  // Частицы
+  particles.forEach(p => {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  });
+}
+
+function drawPagoda(ctx, x, y, s) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+  ctx.fillRect(-7, 0, 14, 28);
+  [0, 1, 2].forEach(i => {
+    ctx.beginPath();
+    ctx.moveTo(-18 + i * 2, -i * 11);
+    ctx.lineTo(18 - i * 2, -i * 11);
+    ctx.lineTo(11 - i * 2, -10 - i * 11);
+    ctx.lineTo(-11 + i * 2, -10 - i * 11);
+    ctx.closePath(); ctx.fill();
+  });
+  ctx.restore();
+}
+
+function drawSamurai(ctx, x, y, alpha, color) {
+  ctx.save(); ctx.globalAlpha = alpha;
+  const c = color || '#E2E8F0';
+  const cd = color ? shadeColor(color, -40) : '#94A3B8';
+  ctx.fillStyle = cd;
+  ctx.fillRect(x - 5, y - player.h + 6, 10, player.h - 6);
+  ctx.fillStyle = c;
+  ctx.beginPath(); ctx.arc(x, y - player.h, 7, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = color || '#1E293B';
+  ctx.beginPath();
+  ctx.roundRect(x - 7, y - player.h - 2, 14, 5, 2);
+  ctx.fill();
+  ctx.strokeStyle = color || '#F59E0B';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x + 5, y - player.h + 8); ctx.lineTo(x + 24, y - player.h - 7); ctx.stroke();
+  ctx.restore();
+}
+
+function shadeColor(color, amount) {
+  const num = parseInt(color.slice(1), 16);
+  const r = Math.max(0, Math.min(255, (num >> 16) + amount));
+  const g = Math.max(0, Math.min(255, ((num >> 8) & 0xff) + amount));
+  const b = Math.max(0, Math.min(255, (num & 0xff) + amount));
+  return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+}
+
+// Управление
+document.getElementById('start-btn').addEventListener('click', () => {
+  document.getElementById('overlay').classList.add('hidden');
+  document.getElementById('ov-score').classList.add('hidden');
+  document.getElementById('ov-best').classList.add('hidden');
+  document.getElementById('shop-open-btn').classList.add('hidden');
+  document.getElementById('share-btn').classList.add('hidden');
+  initGame();
+  gameLoop();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space') { e.preventDefault(); jump(); }
+});
+canvas.addEventListener('click', jump);
+canvas.addEventListener('touchstart', e => { e.preventDefault(); jump(); }, { passive: false });
+
+// Магазин
+document.getElementById('shop-open-btn').addEventListener('click', () => {
+  document.getElementById('shop').classList.remove('hidden');
+});
+document.getElementById('shop-close-btn').addEventListener('click', () => {
+  document.getElementById('shop').classList.add('hidden');
+});
+
+document.querySelectorAll('.shop-item').forEach(el => {
+  el.addEventListener('click', () => {
+    const item = el.dataset.item;
+    const stars = parseInt(el.dataset.stars);
+    buyItem(item, stars);
+  });
+});
+
+function buyItem(item, stars) {
+  if (tg && tg.openInvoice) {
+    // Реальный вызов через бота — бот создаёт invoice и возвращает slug
+    tg.openInvoice('INVOICE_SLUG_FROM_BOT', (status) => {
+      if (status === 'paid') applyItem(item);
+    });
+  } else {
+    // Режим разработки — сразу применяем
+    alert('Тест: куплено ' + item + ' за ' + stars + ' Stars');
+    applyItem(item);
+  }
+}
+
+function applyItem(item) {
+  if (item === 'life') { if (lives < 5) { lives++; updateHUD(); } }
+  if (item === 'shield') { shieldActive = true; }
+  if (item === 'slow') { slowActive = true; slowTimer = 600; }
+  if (item === 'skin_red') { skin = 'skin_red'; localStorage.setItem('skin', 'skin_red'); }
+  document.getElementById('shop').classList.add('hidden');
+  if (!running && !dead) { initGame(); gameLoop(); }
+}
+
+// Поделиться
+document.getElementById('share-btn').addEventListener('click', () => {
+  if (tg) {
+    tg.switchInlineQuery('Мой рекорд в Katana Runner: ' + best + ' очков! Побьёшь? 🥷');
+  }
+});
+
+// Фон для canvas
+draw();
+</script>
+</body>
+</html>
